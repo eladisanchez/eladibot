@@ -122,13 +122,13 @@ function setupTextHandler(bot) {
         if (!messageSent) {
           replyMessage = await ctx.reply(fullResponse || "...");
           messageSent = true;
-        } else if (Date.now() - lastUpdate > 1500) {
+        } else if (Date.now() - lastUpdate > 1000) {
           try {
             await ctx.telegram.editMessageText(
               ctx.chat.id,
               replyMessage.message_id,
               null,
-              fullResponse + " ▌" // Add a cursor effect
+              fullResponse + " ..." // Add a cursor effect
             );
             lastUpdate = Date.now();
           } catch (e) {
