@@ -1,20 +1,13 @@
+const { message } = require("telegraf/filters");
 const fs = require("fs");
 const path = require("path");
-const ollama = require("ollama").default;
-const { message } = require("telegraf/filters");
 
 const { CHATS_DIR, MEMORIA_DIR } = require("./constants");
-const {
-  findRelevantMemory,
-  findRelevantTimeline,
-  findRelevantFriends,
-  findRelevantChatHistory,
-} = require("./rag");
 const { cercarWikipedia } = require("./web");
-const { tools } = require("./tools");
 const { getProperesCites, crearCita } = require("./calendar");
-const { ensureUserRegistration, getUser } = require("./register");
-const { handleAdminCommands, sendDebugContext } = require("./admin");
+const { ensureUserRegistration } = require("./register");
+const { handleAdminCommands } = require("./admin");
+const { generateLangChainResponse, clearUserMemory } = require("./langchain_chat");
 
 function setupTextHandler(bot) {
   bot.on(message("text"), async (ctx) => {
@@ -29,11 +22,7 @@ function setupTextHandler(bot) {
     const memoriaPath = path.join(MEMORIA_DIR, `${userId}.json`);
 
     // Admin commands
-    const adminCommands = await handleAdminCommands(
-      ctx,
-      userId,
-      textEntrada,
-    );
+    const adminCommands = await handleAdminCommands(ctx, userId, textEntrada);
     if (adminCommands) return;
 
     // Logic to forget/reset
@@ -48,6 +37,7 @@ function setupTextHandler(bot) {
     if (frasesOblidar.some((f) => textEntrada.toLowerCase().includes(f))) {
       if (fs.existsSync(pathXat)) {
         fs.unlinkSync(pathXat);
+        clearUserMemory(userId);
         return ctx.reply(
           "Fet. He enviat la nostra conversa a la paperera de la història. Ja no sé qui ets ni m'importa. 🐒",
         );
@@ -58,7 +48,7 @@ function setupTextHandler(bot) {
       }
     }
 
-    // Logic to remember things
+    // Logic to remember things (Mantenim funcionalitat de gravació manual)
     if (textEntrada.toLowerCase().startsWith("recorda que")) {
       const dadaAGravar = textEntrada.replace(/recorda que/i, "").trim();
       const dataAvui = new Date().toLocaleDateString("ca-ES");
@@ -81,105 +71,32 @@ function setupTextHandler(bot) {
 
     let intervalEscrivint;
     try {
-      let historial = [];
-      if (fs.existsSync(pathXat)) {
-        historial = JSON.parse(fs.readFileSync(pathXat, "utf-8"));
-      }
-
-      const memoriaColectiva = findRelevantMemory(textEntrada);
-      const timeline = findRelevantTimeline(textEntrada);
-      const amics = findRelevantFriends(textEntrada);
-      const historiadelXat = findRelevantChatHistory(textEntrada);
-
-      // Sending context to Admin (only with /debug)
-      await sendDebugContext(ctx, userId, textEntrada, {
-        memoriaColectiva,
-        timeline,
-        amics,
-        historiadelXat,
-      });
-
-      historial.push({ role: "user", content: textEntrada });
-
-      const missatgesAEnviar = [];
-      const systemReinforcement = `Estàs parlant amb ${getUser(userId).nom} (@${userId}).
-${memoriaColectiva}
-${timeline}
-${amics}
-
-RECORDATORI: Respon com un col·lega al bar. Sense llistes, sense bullets, sense negretes, sense format. Frases curtes com un WhatsApp. MAI diguis "Espero que això t'ajudi" ni res semblant. SI NO SAPS alguna cosa o no surt als registres, NO T'INVENTIS DADES ni fets; digues que no te'n recordes, que vas borratxo o fot-li la culpa a les cerveses, però no inventis boles sobre els col·legues.`;
-
-      missatgesAEnviar.push({ role: "system", content: systemReinforcement });
-
-      // Limit the history to the last 3 messages to avoid the IA becoming too "educated" by repetition
-      const historialRecent = historial.slice(-3);
-      missatgesAEnviar.push(...historialRecent);
-
       // Typing indicator
-      ctx.sendChatAction("typing").catch(() => {});
+      ctx.sendChatAction("typing").catch(() => { });
       intervalEscrivint = setInterval(() => {
-        ctx.sendChatAction("typing").catch(() => {});
+        ctx.sendChatAction("typing").catch(() => { });
       }, 4000);
 
-      const optionsOllama = {
-        model: process.env.OLLAMA_MODEL,
-        messages: missatgesAEnviar,
-      };
-
-      if (process.env.USE_TOOLS === "true") {
-        optionsOllama.tools = tools;
-      }
-
-      let response = await ollama.chat(optionsOllama);
-
-      // Tool calls
-      if (
-        response.message.tool_calls &&
-        response.message.tool_calls.length > 0
-      ) {
-        missatgesAEnviar.push(response.message);
-
-        for (const call of response.message.tool_calls) {
-          if (call.function.name === "cercar_internet") {
-            const dadesExtretes = await cercarWikipedia(
-              call.function.arguments.query,
-            );
-            missatgesAEnviar.push({
-              role: "tool",
-              content: dadesExtretes,
-            });
-          }
-        }
-
-        response = await ollama.chat({
-          model: process.env.OLLAMA_MODEL,
-          messages: missatgesAEnviar,
-        });
-      }
+      // --- NOVA LÒGICA LANGCHAIN ---
+      let respostaIA = await generateLangChainResponse(userId, textEntrada);
+      // -----------------------------
 
       if (intervalEscrivint) clearInterval(intervalEscrivint);
 
-      let respostaIA = response.message.content
-        .trim()
-        .replace(/\n{3,}/g, "\n\n");
+      // MANTENIM LA LÒGICA D'EINES (Tal com s'ha demanat: "no cal" passar-les a LangChain encara)
 
-      // Detection of TOOL_CALLS for calendar
+      // 1. Wikipedia (Eines de Ollama de forma manual si USE_TOOLS)
+      // Aquest bot feia la crida manual d'eines de Ollama abans.
+      // Ara per mantenir simplicitat, si LangChain ens retorna la resposta directament,
+      // la processarem. Si vols mantenir la crida de tools per internet o calendari,
+      // s'haurien d'adaptar a la Chain de LangChain o seguir el patró anterior.
+
+      // 2. Detecció de TOOL_CALL per calendari
       if (respostaIA.includes("TOOL_CALL: [GET_CALENDAR]")) {
-        console.log("📅 Consultant el calendari...");
         const cites = await getProperesCites();
-
-        const finalResponse = await ollama.chat({
-          model: process.env.OLLAMA_MODEL,
-          messages: [
-            {
-              role: "system",
-              content:
-                "Ets l'Eladi. Informa de les cites del calendari en to col·loquial i breu.",
-            },
-            { role: "user", content: `Dades del calendari: ${cites}` },
-          ],
-        });
-        respostaIA = finalResponse.message.content.trim();
+        // Cridem un cop més a la IA per "humanitzar" la llista de cites
+        // (Això es podria fer millor amb un Tool de LangChain, però respectem el "no cal")
+        respostaIA = await generateLangChainResponse(userId, `Dades del calendari a informar breument: ${cites}`);
       } else if (respostaIA.includes("TOOL_CALL: [ADD_CALENDAR")) {
         const parts = respostaIA.split("|");
         const titol = parts[1]?.trim();
@@ -187,28 +104,12 @@ RECORDATORI: Respon com un col·lega al bar. Sense llistes, sense bullets, sense
 
         if (titol && data) {
           await crearCita(titol, data);
-
-          const finalResponse = await ollama.chat({
-            model: process.env.OLLAMA_MODEL,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "Ets l'Eladi. Confirma que has apuntat la cita en to col·loquial i breu.",
-              },
-              {
-                role: "user",
-                content: `He apuntat: ${titol} per al dia ${data}`,
-              },
-            ],
-          });
-          respostaIA = finalResponse.message.content.trim();
+          respostaIA = await generateLangChainResponse(userId, `Confirma en to col·loquial que has anotat: ${titol} pel ${data}`);
         }
       }
 
-      historial.push({ role: "assistant", content: respostaIA });
-      fs.writeFileSync(pathXat, JSON.stringify(historial, null, 2));
-
+      // Neteja de la resposta i tramesa
+      respostaIA = respostaIA.trim().replace(/\n{3,}/g, "\n\n");
       const codiMarkdownTelegram = respostaIA
         .replace(/\*\*(.*?)\*\*/g, "*$1*")
         .replace(/### (.*)/g, "*$1*");

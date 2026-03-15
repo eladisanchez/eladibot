@@ -62,4 +62,5 @@ loadUsers();
 module.exports = {
   ensureUserRegistration,
   getUser,
+  loadUsers,
 };
