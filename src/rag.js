@@ -46,7 +46,7 @@ function formatRelativeDate(dataStr) {
 /**
  * 1. Search in specific memory (specific data of users)
  */
-function findRelevantMemory(userMessage) {
+async function findMemory(userMessage) {
   if (!fs.existsSync(MEMORIA_DIR)) return "";
   try {
     const keywords = normalize(userMessage)
@@ -97,7 +97,7 @@ function findRelevantMemory(userMessage) {
 /**
  * 2. Search in Timeline (Anecdotes and history of the group)
  */
-function findRelevantTimeline(userMessage) {
+async function findTimeline(userMessage) {
   if (!fs.existsSync(TIMELINE_FILE)) return "";
   try {
     const data = JSON.parse(fs.readFileSync(TIMELINE_FILE, "utf-8"));
@@ -138,7 +138,7 @@ function findRelevantTimeline(userMessage) {
 /**
  * 3. Search in Friends' files (Who is who)
  */
-function findRelevantFriends(userMessage) {
+function findFriends(userMessage) {
   if (!fs.existsSync(AMICS_FILE)) return "";
   try {
     const friends = JSON.parse(fs.readFileSync(AMICS_FILE, "utf-8"));
@@ -173,6 +173,14 @@ function findRelevantFriends(userMessage) {
     console.error("Error memoryEngine (Amics):", e);
     return "";
   }
+}
+
+async function findRelevantMemory(userMessage) {
+  let text = "";
+  text += findMemory(userMessage);
+  text += findTimeline(userMessage);
+  text += findFriends(userMessage);
+  return Promise.resolve(text);
 }
 
 /**
@@ -224,9 +232,28 @@ function findRelevantChatHistory(userMessage) {
   }
 }
 
+function saveMemory(user, message) {
+  if (!fs.existsSync(MEMORIA_DIR)) fs.mkdirSync(MEMORIA_DIR);
+  const file = path.join(MEMORIA_DIR, `${user}.json`);
+  let data = [];
+  if (fs.existsSync(file)) data = JSON.parse(fs.readFileSync(file, "utf-8"));
+  data.push({ text: message, date: new Date().toISOString() });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+function saveToChatHistory(user, message) {
+  if (!fs.existsSync(CHATS_DIR)) fs.mkdirSync(CHATS_DIR);
+  const file = path.join(CHATS_DIR, `${user}.json`);
+  let data = [];
+  if (fs.existsSync(file)) data = JSON.parse(fs.readFileSync(file, "utf-8"));
+  data.push({ text: message, date: new Date().toISOString() });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+
 module.exports = {
   findRelevantMemory,
-  findRelevantTimeline,
-  findRelevantFriends,
   findRelevantChatHistory,
-};
+  saveMemory,
+  saveToChatHistory
+}
