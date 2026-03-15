@@ -67,16 +67,10 @@ Assegura’t que Ollama estigui en marxa (`ollama serve`) i que el model `OLLAMA
 
 ### Amb PM2 / producció
 
-Si fas servir PM2 (tal com suggereix `reset.sh`), pots tenir alguna cosa semblant a:
+Si fas servir PM2, pots tenir alguna cosa semblant a:
 
 ```bash
 pm2 start bot.js --name eladi-bot
-```
-
-I per reiniciar ràpid:
-
-```bash
-./reset.sh
 ```
 
 ### RAG (Retrieval-Augmented Generation)
@@ -88,8 +82,3 @@ El model fa servir informació desada en fitxers json per generar les seves resp
 - timeline.json: Conjunt d'anècdotes inicials
 - friends.json: Base de dades d'amics
 - users.json: Base de dades d'usuaris de Telegram
-
-## Notes
-
-- Aquest projecte assumeix que les dades de conversa i memòria són **locals** i no es versionen amb Git.
-- Si canvies rutes o noms de carpetes (`rag`, `fotos`, etc.), assegura’t d’actualitzar els `require` i constants a `src/constants.js` i la resta de mòduls.
