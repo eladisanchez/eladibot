@@ -11,11 +11,15 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@langchain/community": "^0.3.59",
+    "@langchain/core": "^0.3.80",
+    "@langchain/ollama": "^0.1.6",
     "axios": "^1.13.6",
     "dotenv": "^17.3.1",
     "duck-duck-scrape": "^2.2.7",
     "googleapis": "^171.4.0",
     "googlethis": "^1.8.0",
+    "langchain": "^0.3.37",
     "ollama": "^0.6.3",
     "telegraf": "^4.16.3"
   }
