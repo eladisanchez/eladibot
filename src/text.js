@@ -5,7 +5,7 @@ const path = require("path");
 const { CHATS_DIR, MEMORIA_DIR } = require("./constants");
 const { ensureUserRegistration } = require("./register");
 const { handleAdminCommands } = require("./admin");
-const { generateLangChainResponse, clearUserMemory } = require("./langchain_chat");
+const { generateLangChainResponse, generateStreamingLangChainResponse, saveChatHistory, clearUserMemory } = require("./langchain_chat");
 
 /**
  * Handles memory recording commands
@@ -108,21 +108,63 @@ function setupTextHandler(bot) {
         ctx.sendChatAction("typing").catch(() => { });
       }, 4000);
 
-      let rawResponse = await generateLangChainResponse(userId, textEntrada);
+      let fullResponse = "";
+      let lastUpdate = Date.now();
+      let messageSent = false;
+      let replyMessage;
+
+      const stream = await generateStreamingLangChainResponse(userId, textEntrada);
+
+      for await (const chunk of stream) {
+        fullResponse += chunk.content;
+
+        // Throttling: update every 1.5 seconds or if it's the very first chunk
+        if (!messageSent) {
+          replyMessage = await ctx.reply(fullResponse || "...");
+          messageSent = true;
+        } else if (Date.now() - lastUpdate > 1500) {
+          try {
+            await ctx.telegram.editMessageText(
+              ctx.chat.id,
+              replyMessage.message_id,
+              null,
+              fullResponse + " ▌" // Add a cursor effect
+            );
+            lastUpdate = Date.now();
+          } catch (e) {
+            // Ignore "message is not modified" errors
+          }
+        }
+      }
 
       if (intervalTyping) clearInterval(intervalTyping);
 
-      // Clean up response and send
-      const cleanedResponse = rawResponse.trim().replace(/\n{3,}/g, "\n\n");
+      // Final cleanup and formatting
+      const cleanedResponse = fullResponse.trim().replace(/\n{3,}/g, "\n\n");
       const telegramEncodedResponse = cleanedResponse
         .replace(/\*\*(.*?)\*\*/g, "*$1*")
         .replace(/### (.*)/g, "*$1*");
 
       try {
-        await ctx.reply(telegramEncodedResponse, { parse_mode: "Markdown" });
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          replyMessage.message_id,
+          null,
+          telegramEncodedResponse,
+          { parse_mode: "Markdown" }
+        );
       } catch (errorParsing) {
-        await ctx.reply(cleanedResponse);
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          replyMessage.message_id,
+          null,
+          cleanedResponse
+        );
       }
+
+      // Save history after streaming is done
+      await saveChatHistory(userId, textEntrada, fullResponse);
+
     } catch (error) {
       if (intervalTyping) clearInterval(intervalTyping);
       console.error("Error:", error);

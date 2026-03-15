@@ -59,42 +59,12 @@ function getOrCreateMemory(userId) {
 }
 
 /**
- * Genera una resposta utilitzant la cadena de LangChain
+ * Guarda el nou missatge a l'historial (memòria i fitxer)
  */
-async function generateLangChainResponse(userId, userInput) {
+async function saveChatHistory(userId, userInput, assistantResponse) {
   const memory = getOrCreateMemory(userId);
-  const user = getUser(userId);
+  await memory.saveContext({ input: userInput }, { output: assistantResponse });
 
-  // 1. Obtenir context semàntic del RAG (inclou ara xats previs)
-  const context = await getRelevantContext(userInput);
-
-  // 2. Definir el Prompt
-  const prompt = ChatPromptTemplate.fromMessages([
-    ["system", `Ets l'Eladi. Estàs parlant amb ${user.nom} (@${userId}).
-PROXIMITAT I CONTEXT:
-${context}
-
-RECORDATORI: Respon com un col·lega al bar. Sense llistes, sense bullets, sense negretes, sense format. Frases curtes com un WhatsApp. MAI diguis "Espero que això t'ajudi" ni res semblant.`],
-    new MessagesPlaceholder("chat_history"),
-    ["human", "{input}"],
-  ]);
-
-  // 3. Obtenir l'historial de la memòria
-  const { chat_history } = await memory.loadMemoryVariables({});
-
-  // 4. Formatejar el prompt
-  const formattedPrompt = await prompt.formatMessages({
-    input: userInput,
-    chat_history: chat_history
-  });
-
-  // 5. Cridar el model
-  const response = await chatModel.invoke(formattedPrompt);
-
-  // 6. Guardar el nou missatge a la memòria de LangChain
-  await memory.saveContext({ input: userInput }, { output: response.content });
-
-  // 7. Persistència a fitxer JSON (perquè no es perdi en reiniciar)
   const pathXat = path.join(CHATS_DIR, `${userId}.json`);
   let fullHistory = [];
   if (fs.existsSync(pathXat)) {
@@ -105,14 +75,72 @@ RECORDATORI: Respon com un col·lega al bar. Sense llistes, sense bullets, sense
     }
   }
   fullHistory.push({ role: "user", content: userInput });
-  fullHistory.push({ role: "assistant", content: response.content });
+  fullHistory.push({ role: "assistant", content: assistantResponse });
 
-  // Limitem el fitxer a 100 missatges per no créixer infinitament
   if (fullHistory.length > 100) fullHistory = fullHistory.slice(-100);
-
   fs.writeFileSync(pathXat, JSON.stringify(fullHistory, null, 2));
+}
+
+/**
+ * Genera una resposta utilitzant la cadena de LangChain
+ */
+async function generateLangChainResponse(userId, userInput) {
+  const memory = getOrCreateMemory(userId);
+  const user = getUser(userId);
+
+  const context = await getRelevantContext(userInput);
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    ["system", `Ets l'Eladi. Estàs parlant amb ${user.nom} (@${userId}).
+PROXIMITAT I CONTEXT:
+${context}
+
+RECORDATORI: Respon com un col·lega al bar. Sense llistes, sense bullets, sense negretes, sense format. Frases curtes com un WhatsApp. MAI diguis "Espero que això t'ajudi" ni res semblant.`],
+    new MessagesPlaceholder("chat_history"),
+    ["human", "{input}"],
+  ]);
+
+  const { chat_history } = await memory.loadMemoryVariables({});
+
+  const formattedPrompt = await prompt.formatMessages({
+    input: userInput,
+    chat_history: chat_history
+  });
+
+  const response = await chatModel.invoke(formattedPrompt);
+
+  await saveChatHistory(userId, userInput, response.content);
 
   return response.content;
+}
+
+/**
+ * Genera un stream de resposta utilitzant LangChain
+ */
+async function generateStreamingLangChainResponse(userId, userInput) {
+  const memory = getOrCreateMemory(userId);
+  const user = getUser(userId);
+
+  const context = await getRelevantContext(userInput);
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    ["system", `Ets l'Eladi. Estàs parlant amb ${user.nom} (@${userId}).
+PROXIMITAT I CONTEXT:
+${context}
+
+RECORDATORI: Respon com un col·lega al bar. Sense llistes, sense bullets, sense negretes, sense format. Frases curtes com un WhatsApp. MAI diguis "Espero que això t'ajudi" ni res semblant.`],
+    new MessagesPlaceholder("chat_history"),
+    ["human", "{input}"],
+  ]);
+
+  const { chat_history } = await memory.loadMemoryVariables({});
+
+  const formattedPrompt = await prompt.formatMessages({
+    input: userInput,
+    chat_history: chat_history
+  });
+
+  return await chatModel.stream(formattedPrompt);
 }
 
 function clearUserMemory(userId) {
@@ -121,5 +149,7 @@ function clearUserMemory(userId) {
 
 module.exports = {
   generateLangChainResponse,
+  generateStreamingLangChainResponse,
+  saveChatHistory,
   clearUserMemory
 };
