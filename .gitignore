@@ -1,0 +1,6 @@
+.env
+node_modules/
+historic/
+rag/
+fotos/
+.aider*
