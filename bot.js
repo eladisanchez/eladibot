@@ -25,4 +25,22 @@ setupTextHandler(bot);
 setupPhotoHandler(bot);
 setupCallbackQueries(bot);
 
+const defaultCommands = [
+  { command: "esborra", description: "Elimina totes les teves converses de la memòria" },
+  { command: "guarda", description: "Guarda un record a la memòria" },
+  { command: "conte", description: "L'Eladi et genera un conte segons el que li diguis" },
+  { command: "haiku", description: "L'Eladi et fa un haiku ben parit" }
+]
+
+// Comands per defecte (tothom)
+bot.telegram.setMyCommands(defaultCommands);
+
+// Comands per l'admin (eladisc)
+bot.telegram.setMyCommands([
+  ...defaultCommands,
+  { command: "xats", description: "Llistar tots els xats guardats" },
+], {
+  scope: { type: "chat", chat_id: 491435209 }
+});
+
 bot.launch();
